@@ -1,0 +1,252 @@
+// server.js - Minimaler Express-Server zum Bereitstellen von Flughafendaten.
+// Die Daten werden direkt von GitHub abgerufen und im Speicher zwischengespeichert.
+
+import express from "express";
+import cors from "cors";
+import axios from "axios";
+import { parse } from "csv-parse/sync";
+import fs from "fs/promises";
+import path from "path";
+
+const SVXMET_VERSION = process.env.SVXMET_VERSION || "0.1.0";
+
+
+// Der Port, auf dem der Server läuft
+const PORT = 3030;
+
+// Die URL zur CSV-Datei auf GitHub
+const IATA_ICAO_CSV_URL = "https://raw.githubusercontent.com/ip2location/ip2location-iata-icao/master/iata-icao.csv";
+const METAR_STATIONS_URL = "https://tgftp.nws.noaa.gov/data/observations/metar/stations/";
+
+// Lokaler Pfad zur Datei mit den METAR-Stationen für das Testszenario
+const LOCAL_METAR_STATIONS_PATH = "/tmp/stations.txt";
+const DTMF_PTY = "/dev/pts/2";
+
+// Cache-Objekt und Zeit für die Zwischenspeicherung (6 Stunden)
+let airportCache = null;
+let metarStationsCache = null;
+const AIRPORT_CACHE_MS = 6 * 60 * 60 * 1000;
+const METAR_STATIONS_CACHE_MS = 1 * 60 * 60 * 1000;
+
+/**
+ * Ruft Flughafendaten von GitHub ab, parst sie und speichert sie im Cache.
+ * @returns {Promise<Array>} Ein Array von Flughafenobjekten.
+ */
+async function getAirports() {
+  // Überprüfen, ob der Cache noch gültig ist
+  if (airportCache && Date.now() - airportCache.ts < AIRPORT_CACHE_MS) {
+    console.log("[airports] Using cached data.");
+    return airportCache.data;
+  }
+
+  try {
+    console.log("[airports] Fetching data from GitHub...");
+    // Daten von der URL abrufen
+    const response = await axios.get(IATA_ICAO_CSV_URL);
+    const csvContent = response.data;
+    
+    // CSV-Daten parsen
+    let records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+    });
+    
+    console.log(`[airports] Parsed initial records: ${records.length}`);
+
+    // Nur gültige Datensätze mit den erforderlichen Feldern filtern
+    records = records.filter(record => {
+        const isValid = record.region_name && record.airport;
+        if (!isValid) {
+            console.warn("[airports] Skipping malformed record:", record);
+        }
+        return isValid;
+    });
+    console.log(`[airports] Records after filter: ${records.length}`);
+
+    // Daten alphabetisch nach ICAO-Code sortieren
+    records.sort((a, b) => a.icao.localeCompare(b.icao));
+
+    // Daten im Cache speichern
+    airportCache = { ts: Date.now(), data: records };
+    console.log(`[airports] Successfully loaded ${records.length} records.`);
+    return records;
+  } catch (e) {
+    console.error("[airports] Failed to fetch or parse data from GitHub:", e.message);
+    
+    // Bei Fehlern einen leeren Datensatz im Cache speichern, um weitere Versuche zu vermeiden
+    airportCache = { ts: Date.now(), data: [] };
+    return [];
+  }
+}
+
+/**
+ * Ruft die Liste der METAR-Stationen von der NOAA-Website ab, bereinigt sie und speichert sie in einer lokalen Datei, um sie dann von dort zu verarbeiten.
+ * @returns {Promise<Set<string>>} Eine Menge von ICAO-Codes mit METAR-Daten.
+ */
+async function getMetarStations() {
+  if (metarStationsCache && Date.now() - metarStationsCache.ts < METAR_STATIONS_CACHE_MS) {
+    console.log("[metar-stations] Using cached data.");
+    return metarStationsCache.data;
+  }
+
+  try {
+    // Daten von der NOAA-Website abrufen
+    console.log("[metar-stations] Fetching list from NOAA website...");
+    const response = await axios.get(METAR_STATIONS_URL);
+    const content = response.data;
+    const icaoCodes = new Set();
+    
+    // Regulären Ausdruck verwenden, um ICAO-Codes aus dem HTML zu extrahieren
+    const regex = /<a href="(\w{4})\.TXT">/g;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      icaoCodes.add(match[1].toUpperCase());
+    }
+
+    // Daten in temporäre Datei schreiben
+    await fs.writeFile(LOCAL_METAR_STATIONS_PATH, Array.from(icaoCodes).join('\n'), "utf8");
+    console.log(`[metar-stations] Successfully wrote ${icaoCodes.size} station codes to ${LOCAL_METAR_STATIONS_PATH}.`);
+
+    // Daten aus der lokalen Datei einlesen
+    console.log("[metar-stations] Reading station list from local file for processing...");
+    const fileContent = await fs.readFile(LOCAL_METAR_STATIONS_PATH, "utf8");
+    const lines = fileContent.split('\n');
+    const processedIcaoCodes = new Set();
+    
+    lines.forEach(line => {
+      const trimmedLine = line.trim();
+      if (trimmedLine.length === 4) {
+        processedIcaoCodes.add(trimmedLine.toUpperCase());
+      }
+    });
+
+    metarStationsCache = { ts: Date.now(), data: processedIcaoCodes };
+    console.log(`[metar-stations] Successfully loaded ${processedIcaoCodes.size} stations from local file.`);
+    return processedIcaoCodes;
+  } catch (e) {
+    console.error("[metar-stations] Failed to process station list:", e.message);
+    return new Set();
+  }
+}
+
+// Express-Anwendung initialisieren
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Funktion zur Umwandlung von ICAO-Code in SMS-Tastenreihenfolge
+const icaoToSmsSequence = (icao) => {
+  if (!icao || typeof icao !== 'string' || icao.length !== 4) {
+    return "";
+  }
+  
+  const mapping = {
+    'A': '2', 'B': '22', 'C': '222',
+    'D': '3', 'E': '33', 'F': '333',
+    'G': '4', 'H': '44', 'I': '444',
+    'J': '5', 'K': '55', 'L': '555',
+    'M': '6', 'N': '66', 'O': '666',
+    'P': '7', 'Q': '77', 'R': '777', 'S': '7777',
+    'T': '8', 'U': '88', 'V': '888',
+    'W': '9', 'X': '99', 'Y': '999', 'Z': '9999'
+  };
+
+  const characters = icao.toUpperCase().split('');
+  const sequence = characters.map(char => mapping[char] || '').join('*');
+
+  return sequence;
+};
+
+// API-Endpunkt zum Abrufen der Flughafendaten
+app.get("/api/airports", async (req, res) => {
+  const icaoQuery = req.query.icao;
+  const metarFilter = req.query.metarAvailable === 'true'; // Neuer Filter-Parameter
+  
+  console.log(`[server] API request received for /api/airports with query: ${icaoQuery || "none"}, metarAvailable: ${metarFilter}`);
+  
+  try {
+    const allAirports = await getAirports();
+    const metarStations = await getMetarStations();
+    
+    // Daten zusammenführen und METAR-Status hinzufügen
+    const airportsWithMetar = allAirports.map(airport => ({
+      ...airport,
+      metarAvailable: metarStations.has(airport.icao)
+    }));
+    
+    let airports = airportsWithMetar;
+    
+    // Filtern nach METAR-Verfügbarkeit, falls der Parameter gesetzt ist
+    if (metarFilter) {
+      airports = airports.filter(a => a.metarAvailable);
+      console.log(`[server] Filtered by METAR availability, found ${airports.length} matches.`);
+    }
+    
+    // Wenn ein ICAO-Parameter übergeben wird, filtern Sie die Daten
+    if (icaoQuery) {
+      const queryLower = icaoQuery.toLowerCase();
+      // Suche nach einem ICAO-Code, der mit der Eingabe beginnt
+      airports = airports.filter(a => a.icao.toLowerCase().startsWith(queryLower));
+      
+      console.log(`[server] Filtered by ICAO query, found ${airports.length} matches.`);
+    }
+    
+    // Loggen der gefundenen Ergebnisse
+    console.log("[server] Found airports:", airports);
+    
+    res.json({ count: airports.length, airports });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load airport data." });
+  }
+});
+
+// API-Endpunkt zum Abrufen von METAR-Daten
+app.get("/api/metar", async (req, res) => {
+  const icao = req.query.icao;
+  if (!icao) {
+    return res.status(400).json({ error: "ICAO code is required." });
+  }
+
+  try {
+    const url = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json`;
+    console.log(`[metar] Fetching METAR data for ${icao}`);
+    const response = await axios.get(url);
+    res.json(response.data);
+  } catch (e) {
+    console.error("[metar] Failed to fetch METAR data:", e.message);
+    res.status(500).json({ error: "Failed to fetch METAR data." });
+  }
+});
+
+// Neuer Endpunkt für die DTMF-SMS-Sequenz
+app.post("/api/dtmf", async (req, res) => {
+  const { digits } = req.body || {};
+  if (!digits || !/^[0-9*#]+$/i.test(digits)) {
+    return res.status(400).json({ error: "Invalid digits provided." });
+  }
+
+  try {
+    console.log(`[dtmf] Writing digits to ${DTMF_PTY}: ${digits}`);
+    await fs.writeFile(DTMF_PTY, String(digits).toUpperCase() + "\n", "utf8");
+    res.json({ ok: true, message: "Digits successfully sent to device." });
+  } catch (e) {
+    console.error("[dtmf] Failed to write to device:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Neuer Endpunkt für die Versionsnummer
+app.get("/api/version", async (req, res) => {
+  console.log("[server] API request received for /api/version");
+  try {
+    res.json({ version: SVXMET_VERSION });
+  } catch (e) {
+    console.error("[server] Failed to provide version number:", e.message);
+    res.status(500).json({ ok: false, error: "Failed to provide version number." });
+  }
+});
+
+// Server starten
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});

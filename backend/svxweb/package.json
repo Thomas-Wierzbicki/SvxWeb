@@ -1,0 +1,23 @@
+{
+  "name": "svxweb",
+  "version": "1.0.0",
+  "description": "SVXLink Web-Frontend + Backend",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.11.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "mqtt": "^5.14.0",
+    "xml2js": "^0.6.2"
+  }
+}

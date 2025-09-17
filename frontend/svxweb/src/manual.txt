@@ -1,0 +1,15 @@
+1. Die drei Dateien genau so speichern:
+
+src/main.jsx
+src/index.css
+src/App.jsx
+
+2. Dev-Test: 
+
+npm run dev -- --host
+
+3. Produktion:
+
+npm run build
+sudo rsync -a --delete dist/ /var/www/svxlink/
+sudo systemctl reload apache2

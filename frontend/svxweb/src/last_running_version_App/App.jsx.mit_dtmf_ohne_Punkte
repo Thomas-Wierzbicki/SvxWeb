@@ -1,0 +1,362 @@
+import React, { useEffect, useState } from 'react';
+
+// Styling für die App
+const appStyles = `
+  .container {
+    font-family: 'Inter', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem;
+    background-color: #f3f4f6;
+    min-height: 100vh;
+  }
+  .card {
+    background-color: white;
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    max-width: 600px;
+    width: 100%;
+  }
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    color: #1f2937;
+  }
+  .row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .input {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    background-color: #f9fafb;
+  }
+  select {
+    cursor: pointer;
+  }
+  .info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+  }
+  .info span {
+    color: #6b7280;
+  }
+  .info input {
+    font-weight: 600;
+    background-color: transparent;
+    border: none;
+    padding: 0;
+  }
+  .mt-8 {
+    margin-top: 2rem;
+  }
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+  }
+  .metar-card {
+    background-color: #f1f5f9;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+  }
+  .metar-card h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+  .metar-card pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 0.875rem;
+    color: #334155;
+  }
+  .metar-card .info {
+    font-size: 1rem;
+  }
+  .sms-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .sms-input-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    background-color: #3b82f6;
+    color: white;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+  }
+  .btn:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+  }
+`;
+
+function icaoToSmsSequence(icao) {
+  if (!icao || typeof icao !== 'string' || icao.length !== 4) {
+    return "";
+  }
+
+  const mapping = {
+    'A': '2', 'B': '22', 'C': '222',
+    'D': '3', 'E': '33', 'F': '333',
+    'G': '4', 'H': '44', 'I': '444',
+    'J': '5', 'K': '55', 'L': '555',
+    'M': '6', 'N': '66', 'O': '666',
+    'P': '7', 'Q': '77', 'R': '777', 'S': '7777',
+    'T': '8', 'U': '88', 'V': '888',
+    'W': '9', 'X': '99', 'Y': '999', 'Z': '9999'
+  };
+
+  const characters = icao.toUpperCase().split('');
+  const sequence = characters.map(char => mapping[char] || '').join('*');
+
+  return sequence;
+}
+
+export default function App() {
+  const [airports, setAirports] = useState([]);
+  const [airportLoading, setAirportLoading] = useState(false);
+  const [selectedAirport, setSelectedAirport] = useState("");
+  const [selectedAirportDetails, setSelectedAirportDetails] = useState(null);
+  const [airportQuery, setAirportQuery] = useState("");
+  const [metarData, setMetarData] = useState(null);
+  const [metarLoading, setMetarLoading] = useState(false);
+  const [metarError, setMetarError] = useState(null);
+  const [selectedSmsSequence, setSelectedSmsSequence] = useState("");
+  const [isSendingSms, setIsSendingSms] = useState(false);
+  const [sendSmsError, setSendSmsError] = useState(null);
+  const [sendSmsSuccess, setSendSmsSuccess] = useState(false);
+  
+  // Dieser Hook wird bei jeder Änderung der Suchanfrage ausgelöst
+  useEffect(() => {
+    const fetchAirports = async () => {
+      if (airportQuery.length === 0) {
+        setAirports([]);
+        return;
+      }
+
+      setAirportLoading(true);
+      try {
+        const url = `/api/airports?icao=${airportQuery}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (Array.isArray(data.airports)) {
+          setAirports(data.airports);
+          if (data.airports.length === 1) {
+            setSelectedAirport(data.airports[0].icao);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch airports:", e);
+      } finally {
+        setAirportLoading(false);
+      }
+    };
+    
+    fetchAirports();
+    
+    return () => {};
+  }, [airportQuery]);
+
+  useEffect(() => {
+    const foundAirport = airports.find(a => a.icao === selectedAirport);
+    if (foundAirport) {
+      setSelectedAirportDetails(foundAirport);
+    } else {
+      setSelectedAirportDetails(null);
+    }
+  }, [selectedAirport, airports]);
+
+  // Neuer useEffect-Hook, um METAR-Daten abzurufen
+  useEffect(() => {
+    if (selectedAirportDetails) {
+      setMetarLoading(true);
+      setMetarError(null);
+      
+      const fetchMetarData = async () => {
+        try {
+          const url = `/api/metar?icao=${selectedAirportDetails.icao}`;
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error('Netzwerkfehler beim Abrufen der METAR-Daten');
+          }
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setMetarData(data[0]);
+          } else {
+            setMetarData(null);
+            setMetarError("Keine METAR-Daten für diesen Flughafen gefunden.");
+          }
+        } catch (e) {
+          console.error("Failed to fetch METAR data:", e);
+          setMetarData(null);
+          setMetarError(e.message || "Fehler beim Laden der METAR-Daten.");
+        } finally {
+          setMetarLoading(false);
+        }
+      };
+      
+      fetchMetarData();
+      
+    } else {
+      setMetarData(null);
+      setMetarError(null);
+    }
+  }, [selectedAirportDetails]);
+
+  // Effekt, um die SMS-Sequenz zu aktualisieren, wenn sich der ausgewählte Flughafen ändert
+  useEffect(() => {
+    if (selectedAirportDetails) {
+      const sequence = icaoToSmsSequence(selectedAirportDetails.icao);
+      setSelectedSmsSequence(sequence);
+    } else {
+      setSelectedSmsSequence("");
+    }
+  }, [selectedAirportDetails]);
+
+  const handleSendSms = async () => {
+    if (!selectedSmsSequence) {
+      setSendSmsError("Keine SMS-Sequenz zum Senden.");
+      return;
+    }
+
+    setIsSendingSms(true);
+    setSendSmsError(null);
+    setSendSmsSuccess(false);
+
+    try {
+      const response = await fetch('/api/dtmf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ digits: selectedSmsSequence }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Netzwerkfehler beim Senden der Daten');
+      }
+
+      setSendSmsSuccess(true);
+      console.log('Daten erfolgreich gesendet.');
+    } catch (e) {
+      setSendSmsError(e.message || 'Fehler beim Senden der Daten.');
+      console.error('Fehler beim Senden der Daten:', e);
+    } finally {
+      setIsSendingSms(false);
+    }
+  };
+
+  return (
+    <div className="container">
+      <style>{appStyles}</style>
+      <div className="card">
+        <h1>Flughafen-Info (IATA/ICAO)</h1>
+        <div className="row">
+          <input
+            className="input"
+            placeholder="Suche nach ICAO-Code (z. B. EDDL)"
+            value={airportQuery}
+            onChange={(e) => setAirportQuery(e.target.value)}
+          />
+          <select
+            className="input"
+            value={selectedAirport}
+            onChange={(e) => setSelectedAirport(e.target.value)}
+            disabled={airportLoading}
+          >
+            <option value="" disabled>
+              {airportLoading ? "Lade Flughäfen..." : "Wählen Sie einen Flughafen"}
+            </option>
+            {airports.map((a, index) => (
+              <option key={a.icao} value={a.icao}>
+                {a.metarAvailable ? '🟢 ' : '⚪ '}
+                {index + 1}. {a.region_name} ({a.icao}) — {a.airport}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="row mt-8">
+          <div className="info">
+            <span>Ausgewählter Flughafen</span>
+            <input type="text" className="input" value={selectedAirportDetails ? `${selectedAirportDetails.region_name} (${selectedAirportDetails.icao}) — ${selectedAirportDetails.airport}` : ''} readOnly />
+          </div>
+        </div>
+        <div className="grid2 mt-8">
+          <div className="info">
+            <span>Landescode</span>
+            <strong>{selectedAirportDetails ? selectedAirportDetails.country_code : ''}</strong>
+          </div>
+          <div className="info">
+            <span>IATA</span>
+            <strong>{selectedAirportDetails ? selectedAirportDetails.iata : ''}</strong>
+          </div>
+          <div className="info">
+            <span>ICAO</span>
+            <strong>{selectedAirportDetails ? selectedAirportDetails.icao : ''}</strong>
+          </div>
+          <div className="info">
+            <span>Breitengrad</span>
+            <strong>{selectedAirportDetails ? selectedAirportDetails.latitude : ''}</strong>
+          </div>
+          <div className="info">
+            <span>Längengrad</span>
+            <strong>{selectedAirportDetails ? selectedAirportDetails.longitude : ''}</strong>
+          </div>
+        </div>
+        <div className="metar-card mt-8">
+          <h3>METAR Daten</h3>
+          {metarLoading && <p>Lade METAR-Daten...</p>}
+          {metarError && <p style={{ color: 'red' }}>{metarError}</p>}
+          {metarData && (
+            <pre>{JSON.stringify(metarData, null, 2)}</pre>
+          )}
+        </div>
+        <div className="metar-card mt-8">
+          <h3>SMS Tastenreihenfolge</h3>
+          <div className="sms-section">
+            <div className="sms-input-row">
+              <input 
+                type="text" 
+                className="input" 
+                value={selectedSmsSequence || ''} 
+                readOnly 
+                placeholder="SMS-Sequenz wird hier generiert"
+              />
+              <button 
+                className="btn" 
+                onClick={handleSendSms} 
+                disabled={!selectedSmsSequence || isSendingSms}
+              >
+                {isSendingSms ? 'Sende...' : 'Senden'}
+              </button>
+            </div>
+            {sendSmsSuccess && <p style={{ color: 'green' }}>Daten erfolgreich gesendet!</p>}
+            {sendSmsError && <p style={{ color: 'red' }}>{sendSmsError}</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

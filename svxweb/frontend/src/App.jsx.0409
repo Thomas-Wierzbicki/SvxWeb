@@ -1,0 +1,436 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+
+/* ===== Theme initial / Presets & Version ===== */
+const THEMES = new Set(["light","dark","material","nord","solarized","dark-pro"]);
+const SVXWEB_VERSION = "0.6.2"; // Frontend-Version (diese Datei)
+
+/* System-Theme ermitteln */
+function getInitialTheme() {
+  try {
+    const saved = localStorage.getItem("theme");
+    if (saved && THEMES.has(saved)) return saved;
+  } catch {}
+  return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    ? "dark" : "light";
+}
+
+/* Zuletzt genutzte Konferenz merken */
+function getInitialConf() {
+  try {
+    const saved = localStorage.getItem("selectedConf");
+    if (saved && /^\*.+\*$/.test(saved)) return saved;
+  } catch {}
+  return "*ECHOTEST*";
+}
+
+/* Beschreibungen für Tooltip im Konferenz-Dropdown */
+const confDescriptions = {
+  "*ECHOTEST*": "Testserver: Sprache wird zurückgespielt",
+  "*AMSAT*": "AMSAT: Amateurfunksatelliten / ISS",
+  "*DODROPIN*": "DoDropIn: große offene Konferenz",
+  "*THEGUILD*": "The Guild: internationaler Treffpunkt",
+  "*HAM-CONFERENCE*": "HAM-Conference: allgemeines HAM-QSO",
+  "*ROC-HAM*": "Rochester HAM (USA)",
+};
+
+export default function App() {
+  // ===== Theme =====
+  const [theme, setTheme] = useState(getInitialTheme);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("theme", theme); } catch {}
+  }, [theme]);
+
+  // ===== Status / Logs =====
+  const [status, setStatus] = useState(null); // erwartet u. a. svxwebVersion (Backend)
+  const [busy, setBusy] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const logRef = useRef(null);
+
+  // ===== Konferenzen =====
+  const [confs, setConfs] = useState([]);
+  const [confLoading, setConfLoading] = useState(false);
+  const [confErr, setConfErr] = useState("");
+  const [selectedConf, setSelectedConf] = useState(getInitialConf);
+  const [confQuery, setConfQuery] = useState("");
+
+  // ===== DTMF =====
+  const [dtmf, setDtmf] = useState("");
+
+  // ===== Logins =====
+  const [logins, setLogins] = useState([]);
+  const [loginSel, setLoginSel] = useState("");
+  const [loginsErr, setLoginsErr] = useState("");
+  const [loginsLoading, setLoginsLoading] = useState(false);
+  const [loginQuery, setLoginQuery] = useState("");
+
+  const selectedLogin = useMemo(() => {
+    if (!loginSel) return null;
+    const parts = loginSel.split("|||");
+    if (parts.length < 3) return null;
+    return { callsign: parts[0], location: parts[1], node: parts[2] };
+  }, [loginSel]);
+
+  // Gefilterte Listen (Schnellnavigation)
+  const filteredConfs = useMemo(() => {
+    const q = confQuery.trim().toLowerCase();
+    if (!q) return confs;
+    return confs.filter(c => c.toLowerCase().includes(q));
+  }, [confs, confQuery]);
+
+  const filteredLogins = useMemo(() => {
+    const q = loginQuery.trim().toLowerCase();
+    if (!q) return logins;
+    return logins.filter(l => {
+      const hay = `${l.callsign} ${l.location} ${l.node}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [logins, loginQuery]);
+
+  // Filter-Auswahl stabilisieren
+  useEffect(() => {
+    if (!confQuery) return;
+    if (!filteredConfs.includes(selectedConf) && filteredConfs.length) {
+      setSelectedConf(filteredConfs[0]);
+    }
+  }, [confQuery, filteredConfs, selectedConf]);
+
+  useEffect(() => {
+    if (!loginQuery) return;
+    if (selectedLogin && !filteredLogins.some(l => l.node === selectedLogin.node)) {
+      const first = filteredLogins[0];
+      if (first) setLoginSel(`${first.callsign}|||${first.location}|||${first.node}`);
+    }
+  }, [loginQuery, filteredLogins, selectedLogin]);
+
+  // ===== Polling: Status =====
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch("/api/status");
+        const j = await r.json();
+        if (!alive) return;
+        setStatus(j);
+      } catch {}
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // ===== Polling: Logs =====
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await fetch("/api/logs/tail?lines=150");
+        const j = await r.json();
+        if (!alive) return;
+        setLogs(Array.isArray(j.lines) ? j.lines : []);
+      } catch {}
+      if (alive) setTimeout(poll, 2000);
+    };
+    poll();
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
+  // ===== Laden: Konferenzliste =====
+  async function refreshConfs() {
+    setConfLoading(true);
+    setConfErr("");
+    try {
+      const r = await fetch("/api/echolink/conferences");
+      const j = await r.json();
+      const arr = Array.isArray(j.conferences) ? j.conferences : [];
+      setConfs(arr);
+      if (arr.length && !arr.includes(selectedConf)) {
+        setSelectedConf(arr[0]);
+        try { localStorage.setItem("selectedConf", arr[0]); } catch {}
+      }
+    } catch {
+      setConfErr("Konferenzliste konnte nicht geladen werden.");
+    } finally {
+      setConfLoading(false);
+    }
+  }
+  useEffect(() => { refreshConfs(); }, []);
+
+  // ===== Laden: Logins (structured) =====
+  async function refreshLogins() {
+    setLoginsLoading(true);
+    setLoginsErr("");
+    try {
+      const r = await fetch("/api/echolink/logins_structured");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      const items = Array.isArray(j.items) ? j.items : [];
+      setLogins(items);
+      if (items.length && !loginSel) {
+        setLoginSel(`${items[0].callsign}|||${items[0].location}|||${items[0].node}`);
+      }
+    } catch {
+      setLoginsErr("Logins konnten nicht geladen werden.");
+    } finally {
+      setLoginsLoading(false);
+    }
+  }
+  useEffect(() => { refreshLogins(); }, []);
+
+  // ===== Aktionen: Service =====
+  const service = async (act) => {
+    setBusy(true);
+    try {
+      await fetch(`/api/service/${act}`, { method: "POST" });
+      const st = await fetch("/api/status").then(r => r.json());
+      setStatus(st);
+    } finally { setBusy(false); }
+  };
+
+  // ===== Aktionen: Konferenz / Reflector =====
+  const connectConference = async () => {
+    if (!selectedConf) return;
+    let serverToDial = selectedConf;
+
+    if (selectedConf.startsWith("*")) {
+      const match = logins.find((l) => l.callsign === selectedConf);
+      if (match?.node) {
+        serverToDial = match.node;
+      } else {
+        alert("Für diese Konferenz wurde keine Node-ID gefunden. Bitte Logins aktualisieren und erneut versuchen.");
+        return;
+      }
+    }
+    if (!/^\d{3,}$/.test(serverToDial)) {
+      alert("Ungültiger Zielwert. Bitte eine gültige Node-ID wählen.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await fetch(`/api/reflector/connect`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ server: serverToDial })
+      });
+      const st = await fetch("/api/status").then(r => r.json());
+      setStatus(st);
+      try { localStorage.setItem("selectedConf", selectedConf); } catch {}
+    } finally { setBusy(false); }
+  };
+
+  const disconnectAny = async () => {
+    setBusy(true);
+    try {
+      await fetch(`/api/reflector/disconnect`, { method: "POST" });
+      const st = await fetch("/api/status").then(r => r.json());
+      setStatus(st);
+    } finally { setBusy(false); }
+  };
+
+  // ===== Aktionen: Login (Node-ID) verbinden
+  const connectSelectedLogin = async () => {
+    if (!selectedLogin?.node) return;
+    setBusy(true);
+    try {
+      await fetch(`/api/reflector/connect`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ server: selectedLogin.node })
+      });
+      const st = await fetch("/api/status").then(r => r.json());
+      setStatus(st);
+    } finally { setBusy(false); }
+  };
+
+  // ===== Aktionen: DTMF =====
+  const sendDTMF = async () => {
+    if (!dtmf.trim()) return;
+    setBusy(true);
+    try {
+      await fetch(`/api/dtmf`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ digits: dtmf.trim() })
+      });
+      setDtmf("");
+    } finally { setBusy(false); }
+  };
+
+  // ===== UI =====
+  return (
+    <div className="container">
+      {/* Kopfzeile */}
+      <div className="header">
+        <h1>SVXLink Webfrontend</h1>
+
+        {/* Theme Dropdown */}
+        <div className="row">
+          <select
+            className="input"
+            value={theme}
+            onChange={(e) => setTheme(e.target.value)}
+            title="Theme wählen"
+          >
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="material">Material</option>
+            <option value="nord">Nord</option>
+            <option value="solarized">Solarized</option>
+            <option value="dark-pro">Dark Pro</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Status-Banner */}
+      {status && typeof status.connectedTo !== "undefined" && status.connectedTo !== null && String(status.connectedTo).trim() !== "" && (
+        <div className="banner">
+          <strong>🔗 Verbunden mit:</strong> {String(status.connectedTo)}
+        </div>
+      )}
+
+      {/* Service (mit Versionierung) */}
+      <section className="card">
+        <h2>Dienst</h2>
+        <div className="grid2">
+          <div className="info"><span>Status</span><strong>{status?.service ?? "…"}</strong></div>
+          <div className="info"><span>SVXLink</span><strong>{status?.version ?? "—"}</strong></div>
+          <div className="info"><span>Rufzeichen</span><strong>{status?.nodeCall ?? "—"}</strong></div>
+          <div className="info">
+            <span>Module</span>
+            <strong>{(status?.modules?.map?.(m=>m.name)?.join(", ")) || "—"}</strong>
+          </div>
+          <div className="info"><span>Backend</span><strong>{status?.svxwebVersion ?? "—"}</strong></div>
+          <div className="info"><span>Frontend</span><strong>{SVXWEB_VERSION}</strong></div>
+        </div>
+        <div className="row mt-10">
+          <button className="btn" disabled={busy} onClick={() => service("start")}>Start</button>
+          <button className="btn" disabled={busy} onClick={() => service("stop")}>Stop</button>
+          <button className="btn" disabled={busy} onClick={() => service("restart")}>Restart</button>
+        </div>
+      </section>
+
+      {/* Konferenz verbinden */}
+      <section className="card">
+        <h2>Konferenz verbinden</h2>
+        <div className="row">
+          <input
+            className="input flex-1-240"
+            placeholder="Schnellsuche (z. B. echotest, amsat …)"
+            value={confQuery}
+            onChange={(e)=>setConfQuery(e.target.value)}
+            onKeyDown={(e)=>{ if(e.key === "Enter"){ connectConference(); }}}
+          />
+
+          <select
+            className="input flex-1-260"
+            value={selectedConf}
+            onChange={(e) => {
+              setSelectedConf(e.target.value);
+              try { localStorage.setItem("selectedConf", e.target.value); } catch {}
+            }}
+            disabled={confLoading}
+            title={confDescriptions[selectedConf] || selectedConf}
+          >
+            {(filteredConfs.length ? filteredConfs : confs).map(c => (
+              <option key={c} value={c} title={confDescriptions[c] || c}>
+                {c}
+              </option>
+            ))}
+          </select>
+
+          <button className="btn" disabled={busy || !selectedConf} onClick={connectConference}>
+            Verbinden
+          </button>
+          <button className="btn ghost" disabled={busy} onClick={disconnectAny}>
+            Trennen
+          </button>
+          <button className="btn ghost" disabled={confLoading} onClick={refreshConfs}>
+            Aktualisieren
+          </button>
+        </div>
+        {confErr && <p className="muted mt-6">{confErr}</p>}
+      </section>
+
+      {/* Logins */}
+      <section className="card">
+        <h2>EchoLink Logins</h2>
+        <div className="row">
+          <input
+            className="input flex-1-280"
+            placeholder="Schnellsuche (Rufzeichen, Ort oder Node-ID)"
+            value={loginQuery}
+            onChange={(e)=>setLoginQuery(e.target.value)}
+            onKeyDown={(e)=>{ if(e.key === "Enter"){ connectSelectedLogin(); }}}
+          />
+
+          <select
+            className="input flex-2-380"
+            value={loginSel}
+            onChange={(e)=>setLoginSel(e.target.value)}
+            disabled={loginsLoading}
+          >
+            {(filteredLogins.length ? filteredLogins : logins).map(l => (
+              <option key={`${l.node}-${l.callsign}`} value={`${l.callsign}|||${l.location}|||${l.node}`}>
+                {l.callsign} — {l.location} — {l.node}
+              </option>
+            ))}
+          </select>
+
+          <button className="btn" disabled={busy || !selectedLogin || loginsLoading}
+                  onClick={connectSelectedLogin}>
+            Verbinden
+          </button>
+          <button className="btn ghost" disabled={busy} onClick={disconnectAny}>
+            Trennen
+          </button>
+          <button className="btn ghost" disabled={loginsLoading} onClick={refreshLogins}>
+            {loginsLoading ? "Lade…" : "Aktualisieren"}
+          </button>
+        </div>
+
+        {loginsErr && <p className="muted mt-6">{loginsErr}</p>}
+
+        {selectedLogin && (
+          <div className="grid2 mt-8">
+            <div className="info"><span>Callsign</span><strong>{selectedLogin.callsign}</strong></div>
+            <div className="info"><span>Location</span><strong>{selectedLogin.location}</strong></div>
+            <div className="info"><span>Node</span><strong>{selectedLogin.node}</strong></div>
+          </div>
+        )}
+      </section>
+
+      {/* DTMF */}
+      <section className="card">
+        <h2>DTMF</h2>
+        <div className="row">
+          <input
+            className="input minw-220"
+            value={dtmf}
+            onChange={e=>setDtmf(e.target.value)}
+            placeholder="z. B. *#1234#"
+          />
+          <button className="btn" disabled={busy || !dtmf.trim()} onClick={sendDTMF}>Senden</button>
+          <button className="btn ghost" onClick={()=>setDtmf("")}>Clear</button>
+        </div>
+        <div className="keypad">
+          {[..."123456789*0#"].map(k=>(
+            <button key={k} className="btn" onClick={()=>setDtmf(v=>v+k)}>{k}</button>
+          ))}
+        </div>
+      </section>
+
+      {/* Logs */}
+      <section className="card">
+        <h2>SVXLink Logs</h2>
+        <div ref={logRef} className="logbox">
+          {logs.length ? logs.map((l,i)=>(<div key={i}>{l}</div>)) : <div className="log-empty">(keine Logs)</div>}
+        </div>
+      </section>
+    </div>
+  );
+}

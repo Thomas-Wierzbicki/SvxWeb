@@ -1,0 +1,275 @@
+/* ===== Theme-Variablen ===== */
+:root {
+  --bg: #0ea5e9;	
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e5e7eb;
+
+  --btn-bg: #0ea5e9;
+  --btn-text: #ffffff;
+  --btn-border: #cbd5e1;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1020;
+  --card: #10172a;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --border: #1f2a44;
+
+  --btn-bg: #0284c7;
+  --btn-text: #e5e7eb;
+  --btn-border: #334155;
+}
+
+/* ===== Weitere Themes ===== */
+/* Material (hell) */
+:root[data-theme="material"] {
+  --bg: #f5f5f5;
+  --card: #ffffff;
+  --text: #1f2937;     /* slate-800 */
+  --muted: #6b7280;    /* gray-500 */
+  --border: #e5e7eb;
+
+  --btn-bg: #3f51b5;   /* indigo 500 */
+  --btn-text: #ffffff;
+  --btn-border: #cbd5e1;
+}
+
+/* Nord (dunkel) – https://www.nordtheme.com/ */
+:root[data-theme="nord"] {
+  --bg: #2e3440;       /* nord0 */
+  --card: #3b4252;     /* nord1 */
+  --text: #e5e9f0;     /* nord6 */
+  --muted: #d8dee9;    /* nord4 */
+  --border: #4c566a;   /* nord3 */
+
+  --btn-bg: #88c0d0;   /* nord8 */
+  --btn-text: #2e3440; /* contrast */
+  --btn-border: #434c5e;/* nord3 alt */
+}
+
+/* Solarized Light */
+:root[data-theme="solarized"] {
+  --bg: #fdf6e3;
+  --card: #fffdf5;
+  --text: #073642;
+  --muted: #586e75;
+  --border: #eee8d5;
+
+  --btn-bg: #268bd2;   /* blue */
+  --btn-text: #fdf6e3;
+  --btn-border: #d6cfbb;
+}
+
+/* Optional: richtig dunkles Theme (Dark Pro) */
+:root[data-theme="dark-pro"] {
+  --bg: #0b0f16;
+  --card: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --border: #1f2937;
+
+  --btn-bg: #2563eb;   /* blue-600 */
+  --btn-text: #e5e7eb;
+  --btn-border: #334155;
+}
+
+
+
+
+
+
+
+
+/* ===== App-Grundlayout ===== */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* ===== Kopfzeile / Toggle ===== */
+.header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.header h1 {
+  font-size: clamp(18px, 3.5vw, 26px);
+  margin: 0;
+}
+
+/* ===== Banner (aktive Verbindung) ===== */
+.banner {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--btn-bg);
+  border-radius: 10px;
+  background: rgba(14, 165, 233, 0.08);
+}
+:root[data-theme="dark"] .banner {
+  background: rgba(2, 132, 199, 0.12);
+}
+
+/* ===== Karten / Blöcke ===== */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+
+h2 { margin: 4px 0 10px; font-size: 18px; }
+.muted { color: var(--muted); }
+
+/* ===== Buttons & Inputs ===== */
+.btn, .input {
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--btn-border);
+  font-size: 14px;
+}
+
+.btn {
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  padding: 0 12px;
+  cursor: pointer;
+  border: none;
+}
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--btn-border);
+}
+
+.input {
+  padding: 0 10px;
+  background: var(--card);
+  color: var(--text);
+}
+
+/* Tastaturfokus sichtbarer */
+.btn:focus-visible,
+.input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--btn-bg);
+  outline-offset: 2px;
+}
+
+/* ===== Layout-Helfer ===== */
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.grid2 { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+/* ===== Statusfelder ===== */
+.info {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: rgba(0,0,0,.02);
+}
+:root[data-theme="dark"] .info { background: rgba(255,255,255,.03); }
+
+/* ===== Logbox ===== */
+.logbox {
+  height: 300px;
+  overflow: auto;
+  background: #0a0a0a;
+  color: #a8ff60;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  border-radius: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+}
+.log-empty { color: #94a3b8; }
+
+/* ===== DTMF Keypad ===== */
+.keypad {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(56px, 1fr));
+  gap: 6px;
+}
+.keypad .btn { font-weight: 700; }
+
+/* ===== Mobile Optimierungen ===== */
+@media (max-width: 640px) {
+  .container {
+    padding: 12px;
+  }
+
+  /* Buttons & Inputs in voller Breite, größere Tap-Ziele */
+  .btn,
+  .input,
+  select {
+    width: 100%;
+    height: 48px;          /* komfortabler Touch-Bereich */
+    font-size: 16px;       /* verhindert Zoom auf iOS */
+  }
+
+  /* Reihen untereinander statt nebeneinander */
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Selects wirklich full-width */
+  select.input {
+    max-width: 100%;
+    min-width: unset;
+  }
+
+  /* Karten kompakter */
+  .card {
+    padding: 10px;
+    margin: 10px 0;
+  }
+
+  /* Keypad mit größeren Feldern */
+  .keypad {
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
+    gap: 8px;
+  }
+  .keypad .btn {
+    height: 56px;
+    font-size: 18px;
+    border-radius: 12px;
+  }
+
+  /* Header darf umbrechen */
+  .header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* ===== Utility-Klassen ===== */
+.mt-6   { margin-top: 6px; }
+.mt-8   { margin-top: 8px; }
+.mt-10  { margin-top: 10px; }
+
+.flex-1-240 { flex: 1 1 240px; min-width: 220px; }
+.flex-1-260 { flex: 1 1 260px; min-width: 240px; }
+.flex-1-280 { flex: 1 1 280px; min-width: 260px; }
+.flex-2-380 { flex: 2 1 380px; min-width: 380px; max-width: 100%; }
+
+.minw-220 { min-width: 220px; }
