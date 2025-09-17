@@ -1,11 +1,28 @@
-# SVXLink → MQTT → FHEM Integration
+# SvxWeb – Webfrontend & Smart-Home-Integration für SVXLink
 
-Dieses Projekt ermöglicht die Steuerung von Smart-Home-Geräten über DTMF-Befehle im SVXLink.  
-DTMF-Sequenzen werden von SvxLink erkannt, per MQTT veröffentlicht und in FHEM ausgewertet.
+SvxWeb ist ein webbasiertes Dashboard für [SVXLink](https://github.com/sm0svx/svxlink), mit dem EchoLink-Konferenzen, Nodes und Logs komfortabel im Browser verwaltet werden können.  
+Zusätzlich erlaubt es über DTMF-Befehle die **Integration ins Smart Home** via **MQTT → FHEM**.
 
 ---
 
-## Architektur
+## ✨ Funktionen
+
+- **Webfrontend**
+  - Starten, Stoppen und Neustarten des SVXLink-Dienstes  
+  - Anzeige von Status, Versionen, Netzwerkadressen  
+  - Verbindung zu EchoLink-Konferenzen oder einzelnen Nodes  
+  - DTMF-Eingabe (per Tastatur oder virtuelles Keypad)  
+  - Echtzeit-Loganzeige  
+
+- **Smart-Home-Integration**
+  - DTMF-Sequenzen werden in SVXLink erkannt  
+  - Per Tcl-Hook an MQTT gesendet  
+  - FHEM wertet die MQTT-Nachrichten aus und steuert Geräte  
+  - Rückmeldung über Audio-Feedback („ok“/„error“)  
+
+---
+
+## 🏗️ Architektur
 
 ```
 [ Funkgerät ] → [ SVXLink DTMF ] → [ Tcl-Hook → MQTT Publish ]
@@ -15,21 +32,64 @@ DTMF-Sequenzen werden von SvxLink erkannt, per MQTT veröffentlicht und in FHEM 
 
 ---
 
-## 1. Voraussetzungen
+## 🛠️ Installation
 
-### Pakete installieren (Debian/Raspbian)
+### Voraussetzungen
+- Node.js (>= 18)  
+- npm oder yarn  
+- Eine laufende SVXLink-Installation  
+- MQTT-Broker (z. B. Mosquitto)  
+- FHEM mit Modulen `MQTT2_CLIENT` und `MQTT2_DEVICE`
+
+### Backend starten
+```bash
+cd backend
+npm install
+node server.js
+```
+
+### Frontend starten
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Das Frontend läuft anschließend auf [http://localhost:5173](http://localhost:5173).  
+Das Backend (Express) läuft auf Port 3000 (oder konfiguriert in `server.js`).
+
+---
+
+## 🔗 API-Routen
+
+- `GET /api/status` → Dienststatus  
+- `GET /api/logs/tail?lines=150` → letzte Logzeilen  
+- `GET /api/echolink/conferences` → Konferenzen  
+- `GET /api/echolink/logins_structured` → eingeloggte Nutzer  
+- `GET /api/network/addresses` → Netzwerkadressen  
+- `GET /api/qrz/lookup?callsign=CALL` → QRZ-Daten  
+
+Aktionen:  
+- `POST /api/service/start|stop|restart`  
+- `POST /api/reflector/connect`  
+- `POST /api/reflector/disconnect`  
+- `POST /api/dtmf`  
+
+---
+
+## 📡 SVXLink → MQTT → FHEM Integration
+
+Dieses Projekt ermöglicht die Steuerung von Smart-Home-Geräten über DTMF-Befehle im SVXLink.  
+DTMF-Sequenzen werden von SvxLink erkannt, per MQTT veröffentlicht und in FHEM ausgewertet.
+
+### 1. Pakete installieren (Debian/Raspbian)
+
 ```bash
 sudo apt update
 sudo apt install -y svxlink-server mosquitto mosquitto-clients
 ```
 
-### FHEM
-- Aktuelle FHEM-Installation  
-- Module `MQTT2_CLIENT` und `MQTT2_DEVICE` (Standard)
-
----
-
-## 2. SvxLink: DTMF-Hook → MQTT
+### 2. SvxLink: DTMF-Hook → MQTT
 
 Datei `/etc/svxlink/ev_mqtt_dtmf.tcl`:
 
@@ -91,73 +151,52 @@ Neu starten:
 sudo systemctl restart svxlink
 ```
 
----
+### 3. MQTT Broker prüfen
 
-## 3. MQTT Broker prüfen
-
-### Lauschen
 ```bash
 mosquitto_sub -h 192.168.188.49 -t 'fhem/cmnd/#' -v
 ```
 
-### Test
-- Funkgerät: `77 11 #` → sollte `fhem/cmnd/cmnd_1 on` erscheinen  
-- Funkgerät: `77 10 #` → sollte `fhem/cmnd/cmnd_1 off` erscheinen
+Test:  
+- `77 11 #` → `fhem/cmnd/cmnd_1 on`  
+- `77 10 #` → `fhem/cmnd/cmnd_1 off`
 
----
+### 4. FHEM Konfiguration
 
-## 4. FHEM: MQTT2_CLIENT und MQTT2_DEVICE
-
-### MQTT2_CLIENT
 ```text
 define MqttIO_svxlink MQTT2_CLIENT 192.168.188.49:1883
 attr MqttIO_svxlink room System
-```
 
-### MQTT2_DEVICE für Plug
-```text
 define MQ_plug_01 MQTT2_DEVICE
 attr MQ_plug_01 IODev MqttIO_svxlink
 attr MQ_plug_01 room test
 attr MQ_plug_01 readingList fhem/cmnd/cmnd_1:(.*) state
-attr MQ_plug_01 setList \
-  on:noArg  fhem/cmnd/cmnd_1 on \
-  off:noArg fhem/cmnd/cmnd_1 off
+attr MQ_plug_01 setList   on:noArg  fhem/cmnd/cmnd_1 on   off:noArg fhem/cmnd/cmnd_1 off
 attr MQ_plug_01 stateFormat state
 attr MQ_plug_01 event-on-change-reading state
 ```
 
-### notify: Plug → Hue-Lampe
+Notify:  
 ```text
 define n_MQ_plug_01 notify MQ_plug_01:state:.* set HUEDevice50 $EVENT
 ```
 
----
+### 5. Tests
 
-## 5. Tests
-
-- `set MQ_plug_01 on` → FHEM sendet MQTT `fhem/cmnd/cmnd_1 on`  
-- Funkgerät `77 11 #` → SvxLink sendet `fhem/cmnd/cmnd_1 on` → FHEM Reading `state=on` → notify schaltet `HUEDevice50 on`  
-- Funkgerät `77 10 #` → … analog `off`
+- `set MQ_plug_01 on` → MQTT `fhem/cmnd/cmnd_1 on`  
+- Funkgerät `77 11 #` → SvxLink → MQTT → FHEM Reading `on` → Hue-Lampe an  
 
 ---
 
-## 6. Weiterentwicklung (Empfehlungen)
+## 🚧 Roadmap
 
-- **Status-Topics (`stat/…`)**: Zusätzlich `fhem/stat/cmnd_1` retained publishen → FHEM kennt Zustand auch nach Neustart.  
-- **Scenes:** DTMF-Codes für Szenen definieren (z. B. `77 50 #` → mehrere Lampen schalten).  
-- **Audio-Feedback:** `playMsg "Core" "ok"`/`"error"` für Benutzerbestätigung.  
-- **Absicherung:** Mosquitto mit ACL/Passwort, TLS falls nötig.  
-- **Monitoring:** Heartbeat-Topic (`svxlink/status`) mit `retained` für einfache Überwachung.  
-- **FHEM-Vorlagen:** Zentrales DOIF/notify, das alle `fhem/cmnd/<name>` auf entsprechende Devices mappt.  
+- Status-Topics (`stat/...`) für retained States  
+- Szenensteuerung per DTMF-Codes  
+- TLS/ACL-Absicherung für MQTT  
+- Erweiterte FHEM-Vorlagen  
 
 ---
 
-## 7. Troubleshooting
+## 📜 Lizenz
 
-- **Kein State in FHEM:** `readingList` muss `(.*)` enthalten.  
-- **Notify feuert nicht:** `MQ_plug_01:state:.*` ohne Leerzeichen im Regex.  
-- **Events nicht aktualisiert:** für Debug `attr MQ_plug_01 event-on-update-reading state` setzen.  
-- **Topic stimmt nicht:** per `mosquitto_sub` prüfen, welcher String wirklich gesendet wird.
-
----
+MIT-Lizenz – siehe [LICENSE](LICENSE).
