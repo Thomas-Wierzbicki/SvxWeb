@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 /* ===== Theme initial / Presets & Version ===== */
 const THEMES = new Set(["light","dark","material","nord","solarized","dark-pro"]);
-const SVXWEB_VERSION = "0.7.0"; // Frontend-Version (diese Datei)
+const SVXWEB_VERSION = "0.7.0_1909"; // Frontend-Version (diese Datei)
 
 /* System-Theme ermitteln */
 function getInitialTheme() {

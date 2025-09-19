@@ -27,7 +27,7 @@ console.log("Debug: QRZ_API_KEY is", process.env.QRZ_API_KEY);
 // =============================
 
 
-const SVXWEB_VERSION = process.env.SVXWEB_VERSION || "0.6.9_api";
+const SVXWEB_VERSION = process.env.SVXWEB_VERSION || "0.7.1_1909";
 
 // ===== __dirname / __filename =====
 const __filename = fileURLToPath(import.meta.url);
